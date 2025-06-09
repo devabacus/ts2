@@ -50,9 +50,12 @@ redis:
 
 maxRequestSize: 524288 # The maximum size of requests allowed in bytes
 
+logSettings:
+  logAllQueries: true # Логировать все запросы
+
 sessionLogs:
-  consoleEnabled: false
-# persistentEnabled: true
+  consoleEnabled: true
+  persistentEnabled: true
 # consoleLogFormat: json # Defaults to "json", options are "text" or "json"
 
 # futureCallExecutionEnabled: true # Defaults to true
