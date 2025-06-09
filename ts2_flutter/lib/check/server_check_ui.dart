@@ -55,7 +55,7 @@ class _ServerCheckUiState extends State<ServerCheckUi> {
       // Создаем объект TestData
       final newItem = TestData(
         id: newUuid, 
-        title: _titleController.text
+        newTitle: _titleController.text
       );
       
       // Вызываем client.testData.createTestData()
@@ -73,7 +73,7 @@ class _ServerCheckUiState extends State<ServerCheckUi> {
   Future<void> _updateItem(TestData item, String newTitle) async {
     setState(() => _isLoading = true);
     try {
-      final updatedItem = TestData(id: item.id, title: newTitle);
+      final updatedItem = TestData(id: item.id, newTitle: newTitle);
       // Вызываем client.testData.updateTestData()
       await client.testData.updateTestData(updatedItem);
       await _fetchItems();
@@ -99,7 +99,7 @@ class _ServerCheckUiState extends State<ServerCheckUi> {
   }
 
   void _showEditDialog(TestData item) {
-    final editController = TextEditingController(text: item.title);
+    final editController = TextEditingController(text: item.newTitle);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -181,7 +181,7 @@ class _ServerCheckUiState extends State<ServerCheckUi> {
               itemBuilder: (context, index) {
                 final item = _items[index];
                 return ListTile(
-                  title: Text(item.title),
+                  title: Text(item.newTitle),
                   subtitle: Text('ID: ${item.id?.uuid ?? "N/A"}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
