@@ -7,8 +7,10 @@ class TestDataEndpoint extends Endpoint {
   
   /// Создает новую запись TestData в базе данных.
   Future<TestData> createTestData(Session session, TestData testData) async {
-    await TestData.db.insertRow(session, testData);
-    return testData;
+    final testDataNew = testData.copyWith(title: "ivan");
+
+    await TestData.db.insertRow(session, testDataNew);
+    return testDataNew;
   }
 
   /// Возвращает список всех записей.
