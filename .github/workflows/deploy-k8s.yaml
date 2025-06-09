@@ -2,7 +2,7 @@ name: Build and Deploy to Kubernetes
 
 on:
   push:
-    branches: [ main ] # Убедитесь, что это ваша основная ветка
+    branches: [ master ] # Убедитесь, что это ваша основная ветка
   workflow_dispatch:
 
 jobs:
