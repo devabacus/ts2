@@ -1,72 +1,94 @@
-name: Build and Deploy to Kubernetes
+name: Deploy sync2-server to Kubernetes
 
 on:
   push:
-    branches: [ master ] # Срабатывает при пуше в ветку main
-  workflow_dispatch:      # Позволяет запускать вручную из интерфейса GitHub
+    branches: [ "master" ] # Или "main", в зависимости от вашей основной ветки
+    paths:
+      - 'ts2_server/**' # Срабатывает только при изменениях в папке сервера
+  workflow_dispatch:
 
 jobs:
-  build-and-push-image:
+  build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-      
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # ШАГ СОЗДАНИЯ СЕКРЕТА ОТСЮДА УБРАН
-
-      - name: Log in to Timeweb Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: dbe81550-wise-chickadee.registry.twcstorage.ru
-          username: ${{ secrets.REGISTRY_USER }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./ts2_server # Указываем контекст для сборки
-          file: ./ts2_server/Dockerfile.prod # Путь к вашему Dockerfile
-          push: true
-          tags: dbe81550-wise-chickadee.registry.twcstorage.ru/ts2-server:latest
-
-  deploy-to-cluster:
-    needs: build-and-push-image # Эта задача начнется только после успешной сборки и пуша образа
-    runs-on: ubuntu-latest
+    # Указываем, что все команды должны выполняться в папке вашего сервера
+    defaults:
+      run:
+        working-directory: ./ts2_server
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    # 1. Загружаем исходный код
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Set up Kubeconfig
-        uses: azure/k8s-set-context@v4
-        with:
-          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+    # 2. Настраиваем Dart SDK для генерации кода
+    - name: Setup Dart
+      uses: dart-lang/setup-dart@v1
 
-      # --- ШАГ СОЗДАНИЯ СЕКРЕТА ПЕРЕНЕСЕН СЮДА ---
-      - name: Create or Update Kubernetes Secret
-        run: |
-          kubectl create secret generic serverpod-secrets-ts2 \
-            --from-literal=database-password='${{ secrets.DB_PASSWORD }}' \
-            --from-literal=redis-password='${{ secrets.REDIS_PASSWORD }}' \
-            --from-literal=service-secret='${{ secrets.SERVICE_SECRET }}' \
-            --dry-run=client -o yaml | kubectl apply -f -
+    # 3. Логинимся в Timeweb Container Registry
+    - name: Log in to Timeweb Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: dbe81550-wise-chickadee.registry.twcstorage.ru
+        username: ${{ secrets.REGISTRY_USER }}
+        password: ${{ secrets.REGISTRY_PASSWORD }}
 
-      - name: Apply Kubernetes manifests
-        run: |
-          # Применяем все конфигурации из папки k8s
-          # Файл secret.yaml больше не нужен, так как мы создаем секрет командой выше
-          kubectl apply -f ts2_server/k8s/configmap.yaml
-          kubectl apply -f ts2_server/k8s/deployment.yaml
-          kubectl apply -f ts2_server/k8s/service.yaml
-          kubectl apply -f ts2_server/k8s/ingress.yaml
-          kubectl apply -f ts2_server/k8s/job.yaml
-          
-          # Принудительно перезапускаем Deployment, чтобы он точно подхватил новый образ и секреты
-          kubectl rollout restart deployment ts2-server-deployment
+    # 4. ИЗМЕНЕНИЕ: Запускаем serverpod generate для консистентности
+    - name: Generate Serverpod code
+      run: dart run serverpod generate
+
+    # 5. ИЗМЕНЕНИЕ: Собираем и загружаем образ с уникальным тегом
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./ts2_server
+        file: ./ts2_server/Dockerfile.prod
+        push: true
+        tags: dbe81550-wise-chickadee.registry.twcstorage.ru/ts2-server:${{ github.sha }}
+
+    # 6. Настраиваем kubectl для доступа к кластеру
+    - name: Set up Kubeconfig
+      uses: azure/k8s-set-context@v4
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+    # 7. ИЗМЕНЕНИЕ: Создаем или обновляем секрет Kubernetes
+    - name: Create or Update Kubernetes Secret
+      run: |
+        kubectl create secret generic serverpod-secrets-ts2 \
+          --from-literal=database-password='${{ secrets.DB_PASSWORD }}' \
+          --from-literal=redis-password='${{ secrets.REDIS_PASSWORD }}' \
+          --from-literal=service-secret='${{ secrets.SERVICE_SECRET }}' \
+          --dry-run=client -o yaml | kubectl apply -f -
+
+    # 8. ИЗМЕНЕНИЕ: Обновляем YAML-файлы, подставляя новый тег образа
+    - name: Update YAML files with new image tag
+      run: |
+        sed -i 's|image: .*|image: dbe81550-wise-chickadee.registry.twcstorage.ru/ts2-server:${{ github.sha }}|g' k8s/job.yaml
+        sed -i 's|image: .*|image: dbe81550-wise-chickadee.registry.twcstorage.ru/ts2-server:${{ github.sha }}|g' k8s/deployment.yaml
+
+    # 9. ИЗМЕНЕНИЕ: Применяем все манифесты, КРОМЕ Deployment
+    - name: Apply manifests (except Deployment)
+      run: |
+        kubectl apply -f k8s/configmap.yaml
+        kubectl apply -f k8s/service.yaml
+        kubectl apply -f k8s/ingress.yaml
+        # Удаляем старый Job, чтобы запустить новый
+        kubectl delete job serverpod-migration-job-ts2 --ignore-not-found=true
+        kubectl apply -f k8s/job.yaml
+    
+    # 10. ИЗМЕНЕНИЕ: Ждем успешного завершения миграции (Таймаут 5 минут)
+    - name: Wait for migration job to complete
+      run: kubectl wait --for=condition=complete job/serverpod-migration-job-ts2 --timeout=5m
+    
+    # 11. ИЗМЕНЕНИЕ: Теперь, когда БД готова, развертываем основное приложение
+    - name: Deploy main application
+      run: kubectl apply -f k8s/deployment.yaml
+
+    # 12. Проверяем статус развертывания (Таймаут 2 минуты)
+    - name: Verify deployment rollout
+      run: kubectl rollout status deployment/ts2-server-deployment --timeout=2m
