@@ -3,14 +3,14 @@ project:
   name: "ts2"
   
 server:
-  ip: ""
+  ip: "5.129.200.195"
   http_port: "80:80"
   https_port: "443:443"
   domain: "my-points.ru"
   subdomain:
-    api: "api"
-    web: "web"
-    insights: "insights"
+    api: "api5"
+    web: "web5"
+    insights: "insights5"
   email: "frolprank@gmail.com"
   
 database:
